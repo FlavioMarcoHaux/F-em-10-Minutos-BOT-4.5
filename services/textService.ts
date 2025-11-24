@@ -1,3 +1,4 @@
+
 import { ai } from './geminiClient';
 import { YouTubeLongPost, SocialMediaPost } from '../types';
 
@@ -10,14 +11,22 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
     const targetLang = langMap[language] || 'Inglês';
 
-    // Calculate iterations based on duration to ensure density
-    // 10 min = 2 calls (approx 2500 words) -> High Density
-    // 60 min = 8 calls (approx 10000 words)
-    const numIterations = Math.ceil(duration / 7); 
+    // --- NEW DURATION LOGIC (Word Count based) ---
+    // Average speaking rate for hypnosis/prayer: ~120 words per minute.
+    const WORDS_PER_MINUTE = 120;
+    const totalTargetWords = duration * WORDS_PER_MINUTE;
+    
+    // Gemini Flash output limit is somewhat generous, but to ensure quality and prevent cut-offs,
+    // we limit each generation block to ~800 words (approx 6-7 minutes of audio).
+    const MAX_WORDS_PER_BLOCK = 800;
+    
+    const numIterations = Math.ceil(totalTargetWords / MAX_WORDS_PER_BLOCK);
+    const targetWordsPerBlock = Math.round(totalTargetWords / numIterations);
+
     let fullPrayer = "";
     let lastContext = "";
 
-    console.log(`Starting Recursive Generation: ${duration} min = ${numIterations} iterations.`);
+    console.log(`Starting Recursive Generation: ${duration} min = ~${totalTargetWords} words. Split into ${numIterations} blocks of ~${targetWordsPerBlock} words.`);
 
     for (let i = 0; i < numIterations; i++) {
         const isFirst = i === 0;
@@ -45,7 +54,10 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
 
         const userPrompt = `
         Write Part ${i + 1}/${numIterations} of the prayer about "${prompt}".
-        Duration target for this block: ~8 minutes of spoken text (approx 1200 words).
+        
+        LENGTH CONSTRAINT: Write approximately ${targetWordsPerBlock} words for this section.
+        This is crucial to fill the time slot. Be verbose, detailed, and slow-paced.
+        
         Keep the flow continuous. Start directly with a character name.
         `;
 
@@ -70,7 +82,7 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
 };
 
 export const generateShortPrayer = async (prompt: string, language: string): Promise<string> => {
-    // Short prayer (pills) doesn't need recursion
+    // Short prayer (pills) default to 5 minutes logic (approx 600 words)
     return generateGuidedPrayer(prompt, language, 5); 
 };
 
@@ -78,15 +90,20 @@ export const generateShortPrayer = async (prompt: string, language: string): Pro
 
 export const generateSocialMediaPost = async (prayer: string, language: string): Promise<SocialMediaPost> => {
     const model = 'gemini-2.5-flash';
+    const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
+    const targetLang = langMap[language] || 'Inglês';
+
     const prompt = `
     You are a Social Media Manager for a spiritual channel.
     Create a viral Instagram/TikTok caption for this prayer: "${prayer.substring(0, 500)}..."
-    Language: ${language}
+    
+    CRITICAL: The output language for the Title, Description and Hashtags MUST BE: ${targetLang}.
+    Do NOT output in English unless the target language is English.
     
     Output format JSON:
     {
-        "title": "Catchy Hook (Max 50 chars)",
-        "description": "Engaging caption with emojis (Max 300 chars)",
+        "title": "Catchy Hook (Max 50 chars) in ${targetLang}",
+        "description": "Engaging caption with emojis (Max 300 chars) in ${targetLang}",
         "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5"]
     }
     `;
@@ -102,53 +119,72 @@ export const generateSocialMediaPost = async (prayer: string, language: string):
 
 export const generateYouTubeLongPost = async (theme: string, subthemes: string[], language: string, duration: number): Promise<YouTubeLongPost> => {
     const model = 'gemini-2.5-flash';
-    const isPT = language === 'pt';
     
-    // Define Static Blocks based on Language (Strict Identity)
-    const linksBlock = isPT ? `
+    const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
+    const targetLang = langMap[language] || 'Inglês';
+    
+    const isPT = language === 'pt';
+    const isES = language === 'es';
+    
+    // Channel Name logic
+    // We keep the English name for ES to maintain brand identity, but the content must be Spanish.
+    const channelName = isPT ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'; 
+
+    // Define Static Links Blocks based on Language
+    let linksBlock = '';
+
+    if (isPT) {
+        linksBlock = `
 🌌 PARTICIPE DESTA JORNADA:
-
 ► SÉRIE: Portais da Consciência (Playlist): [https://www.youtube.com/watch?v=Q6x_C3uaKsQ&list=PLmeEfeSNeLbIyeBMB8HLrHwybI__suhgq]
-
 ► SÉRIE: ARQUITETURA DA ALMA (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbIIm3MzGHSRFYfIONlBDofI
-
 ► Oração da Manhã (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbKppEyZUaBoXw4BVxZTq-I2
-
 ► Oração da Noite (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbLFUayT8Sfb9IQzr0ddkrHC
-
 🔗 INSCREVA-SE NO CANAL: https://www.youtube.com/@fe10minutos
-    ` : `
+        `;
+    } else if (isES) {
+        linksBlock = `
+🕊️ MIRA A CONTINUACIÓN:
+► Arquitectura del Alma (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPo11ap1JUSiItZtoiV_4lEH
+► Oraciones Matutinas (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPqym_6TF19PB71SpLpAGuZr
+► Oraciones Vespertinas (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPq91fvXaDSideb8wrnG-YtR
+🔗 SUSCRÍBETE AL CANAL: https://www.youtube.com/@Faithin10Minutes
+        `;
+    } else {
+        // English Default
+        linksBlock = `
 🕊️ WATCH NEXT:
-
 ► Architecture of the Soul (Playlist) https://www.youtube.com/playlist?list=PLTQIQ5QpCYPo11ap1JUSiItZtoiV_4lEH
-
 ► Morning Prayers (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPqym_6TF19PB71SpLpAGuZr
-
 ► Evening Prayers (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPq91fvXaDSideb8wrnG-YtR
-
 🔗 SUBSCRIBE TO THE CHANNEL: https://www.youtube.com/@Faithin10Minutes
-    `;
+        `;
+    }
 
     const systemInstruction = `
-    You are the SEO Expert for the channel '${isPT ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'}'.
+    You are the SEO Expert for the channel '${channelName}'.
     Task: Create metadata for a ${duration}-minute guided prayer video about "${theme}".
     
-    CRITICAL OUTPUT RULES:
-    1. **Title**: Must be CLICKBAIT/High-Urgency. Use CAPS and Emojis. Model: "POWERFUL ${duration} MIN PRAYER for [TOPIC] | ${isPT ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'}".
+    CRITICAL LANGUAGE RULE: ALL OUTPUT (Title, Description, Tags, Timestamps) MUST BE IN ${targetLang.toUpperCase()}.
+    Even if the channel name is in English, translate the rest of the text to ${targetLang}.
+    
+    OUTPUT RULES:
+    1. **Title**: Must be CLICKBAIT/High-Urgency in ${targetLang}. Use CAPS and Emojis. 
+       Model: "[URGENT/POWERFUL ADJECTIVE] ${duration} MIN [PRAYER/CONNECTION] [TOPIC] | ${channelName}".
     2. **Description**: 
-       - Paragraph 1: AIDA Copywriting hook (3 sentences). Start by repeating the exact Title.
-       - Paragraph 2: Describe the prayer using keywords: "powerful prayer", "guided prayer", "relationship with God".
-       - **MANDATORY**: Insert the LINKS BLOCK exactly as provided below (Do not translate URLs or change format).
-       - End with 3 strong hashtags: #Prayer #Faith #[TOPIC_No_Space]
-    3. **Tags**: Generate 20 high-volume tags mixed with long-tail keywords (e.g., Faith in 10 Minutes, ${duration} Minute Prayer, Powerful Prayer, [TOPIC], Daily Prayer).
-    4. **Timestamps**: Generate a list of chapters based on the subthemes. **DO NOT INCLUDE TIME CODES (00:00)**. Just the list of topics (e.g., "Introduction", "Prayer for [Subtheme 1]").
+       - Paragraph 1: AIDA Copywriting hook (3 sentences) in ${targetLang}. Start by repeating the exact Title.
+       - Paragraph 2: Describe the prayer using high volume keywords in ${targetLang}.
+       - **MANDATORY**: Insert the LINKS BLOCK exactly as provided below.
+       - End with 3 strong hashtags: #Prayer #Faith #[TOPIC_No_Space] (Translate these tags to ${targetLang}).
+    3. **Tags**: Generate 20 high-volume tags mixed with long-tail keywords in ${targetLang}.
+    4. **Timestamps**: Generate a list of chapters based on the subthemes in ${targetLang}. **DO NOT INCLUDE TIME CODES (00:00)**. Just the list of topics.
     
     MANDATORY LINKS BLOCK TO INSERT IN DESCRIPTION:
     ${linksBlock}
     `;
 
     const prompt = `
-    Generate JSON for this video:
+    Generate JSON for this video in ${targetLang}:
     Theme: ${theme}
     Subthemes: ${subthemes.join(', ')}
     
@@ -176,9 +212,15 @@ export const generateYouTubeLongPost = async (theme: string, subthemes: string[]
 
 export const getTrendingTopic = async (language: string, type: 'long' | 'short'): Promise<{theme: string, subthemes: string[]}> => {
     // Simulated Trending Topics for the Agent
-    const themes = language === 'pt' 
-        ? ['Cura da Ansiedade', 'Prosperidade Financeira', 'Dormir em Paz', 'Proteção da Família', 'Gratidão Matinal']
-        : ['Healing Anxiety', 'Financial Prosperity', 'Sleep in Peace', 'Family Protection', 'Morning Gratitude'];
+    let themes: string[] = [];
+    
+    if (language === 'pt') {
+        themes = ['Cura da Ansiedade', 'Prosperidade Financeira', 'Dormir em Paz', 'Proteção da Família', 'Gratidão Matinal'];
+    } else if (language === 'es') {
+        themes = ['Sanación de la Ansiedad', 'Prosperidad Financiera', 'Dormir en Paz', 'Protección Familiar', 'Gratitud Matutina'];
+    } else {
+        themes = ['Healing Anxiety', 'Financial Prosperity', 'Sleep in Peace', 'Family Protection', 'Morning Gratitude'];
+    }
     
     const randomTheme = themes[Math.floor(Math.random() * themes.length)];
     

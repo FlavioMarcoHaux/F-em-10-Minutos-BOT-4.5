@@ -34,6 +34,10 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
     
     // New: Duration Selector for Automated Long Videos
     const [agentLongDuration, setAgentLongDuration] = usePersistentState<number>('agent_longDuration', 10);
+
+    // New: Language Selectors
+    const [longLanguages, setLongLanguages] = usePersistentState<string[]>('agent_longLanguages', ['pt', 'en', 'es']);
+    const [shortLanguages, setShortLanguages] = usePersistentState<string[]>('agent_shortLanguages', ['pt', 'en', 'es']);
     
     const [agentStatusLong, setAgentStatusLong] = useState<string>('');
     const [agentStatusShort, setAgentStatusShort] = useState<string>('');
@@ -158,11 +162,20 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
     }, [setHistory, agentLongDuration]);
 
     const runAutomatedLongVideoBatch = useCallback(async () => {
-        const jobIdentifiers = ['pt-long', 'en-long', 'es-long'];
+        // Filter jobs based on selected languages
+        const langsToRun = ['pt', 'en', 'es'].filter(l => longLanguages.includes(l));
+        
+        if (langsToRun.length === 0) return;
+
+        const jobIdentifiers = langsToRun.map(l => `${l}-long`);
         setJobsInProgress(prev => [...prev, ...jobIdentifiers]);
+        
         try {
-            const { theme, subthemes } = await getTrendingTopic('pt', 'long');
-            for (const lang of ['pt', 'en', 'es'] as const) {
+            // We use PT as the base for the theme if available, otherwise fallback
+            const themeLang = langsToRun.includes('pt') ? 'pt' : langsToRun[0];
+            const { theme, subthemes } = await getTrendingTopic(themeLang, 'long');
+            
+            for (const lang of langsToRun) {
                 await generateAndSaveKit(lang, 'long', theme, subthemes);
             }
         } catch (error) {
@@ -170,9 +183,12 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
         } finally {
             setJobsInProgress(prev => prev.filter(job => !jobIdentifiers.includes(job)));
         }
-    }, [generateAndSaveKit]);
+    }, [generateAndSaveKit, longLanguages]);
 
     const runAutomatedShortVideoJob = useCallback(async (jobLang: string) => {
+        // Double check if language is still enabled
+        if (!shortLanguages.includes(jobLang)) return;
+
         const jobIdentifier = `${jobLang}-short`;
         setJobsInProgress(prev => [...prev, jobIdentifier]);
         try {
@@ -183,7 +199,7 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
         } finally {
              setJobsInProgress(prev => prev.filter(job => job !== jobIdentifier));
         }
-    }, [generateAndSaveKit]);
+    }, [generateAndSaveKit, shortLanguages]);
 
 
     useEffect(() => {
@@ -198,10 +214,14 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
             const now = new Date();
             let closestJob = { time: Infinity, details: '' };
 
+            // Only check schedule if we have languages selected
+            if (longLanguages.length === 0) return t('agentStatusIdle').replace('{type}', 'Long').replace('{lang}', 'None').replace('{time}', '--:--');
+
             for (let d = 0; d < 2; d++) {
                 const checkDate = new Date(now);
                 checkDate.setDate(now.getDate() + d);
                 const todayStr = checkDate.toISOString().split('T')[0];
+                // We use PT schedule as the master trigger for the batch
                 const scheduleHours = schedules['pt'].long.slice(0, cadence);
                 
                 for (const hour of scheduleHours) {
@@ -215,30 +235,32 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                            time: jobTime.getTime(),
                            details: t('agentStatusIdle')
                              .replace('{type}', t('agentTitleLong'))
-                             .replace('{lang}', 'PT, EN, ES')
+                             .replace('{lang}', longLanguages.map(l => l.toUpperCase()).join(', '))
                              .replace('{time}', jobTime.toLocaleTimeString(t('appLocaleCode'), { hour: '2-digit', minute: '2-digit' }))
                        };
                     }
                 }
                 if (closestJob.time !== Infinity) break; 
             }
-             return closestJob.details;
+             return closestJob.details || t('agentStatusIdle').replace('{type}', t('agentTitleLong')).replace('{lang}', longLanguages.map(l => l.toUpperCase()).join(', ')).replace('{time}', 'Tomorrow');
         };
 
         const findNextShortJob = (cadence: number) => {
             const now = new Date();
             let closestJob = { time: Infinity, details: '' };
 
-             for (const lang of ['pt', 'en', 'es'] as const) {
+            // Only check selected languages
+             for (const lang of shortLanguages) {
+                 const langKey = lang as 'pt' | 'en' | 'es';
                 for (let d = 0; d < 2; d++) {
                     const checkDate = new Date(now);
                     checkDate.setDate(now.getDate() + d);
                     const todayStr = checkDate.toISOString().split('T')[0];
-                    const scheduleHours = schedules[lang].short.slice(0, cadence);
+                    const scheduleHours = schedules[langKey].short.slice(0, cadence);
                     
                     for (const hour of scheduleHours) {
-                        const minute = offsets[lang];
-                        const jobKey = `${todayStr}_${lang}_short_${hour}:${minute}`;
+                        const minute = offsets[langKey];
+                        const jobKey = `${todayStr}_${langKey}_short_${hour}:${minute}`;
                         const jobTime = new Date(checkDate);
                         jobTime.setHours(hour, minute, 0, 0);
 
@@ -254,17 +276,17 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                     }
                 }
              }
-             return closestJob.details;
+             return closestJob.details || t('agentStatusIdle').replace('{type}', t('marketingShortVideo')).replace('{lang}', shortLanguages.map(l => l.toUpperCase()).join(', ')).replace('{time}', 'Tomorrow');
         };
 
         const updateStatuses = () => {
             const isLongJobRunning = jobsInProgress.some(job => job.endsWith('-long'));
             if (isLongJobRunning) {
                 const typeStr = t('marketingLongVideo');
-                setAgentStatusLong(t('agentStatusRunning').replace('{type}', typeStr).replace('{lang}', 'PT, EN, ES'));
+                setAgentStatusLong(t('agentStatusRunning').replace('{type}', typeStr).replace('{lang}', longLanguages.map(l => l.toUpperCase()).join(', ')));
             } else if (isAgentLongActive) {
                 const nextJob = findNextLongBatchJob(longVideoCadence);
-                setAgentStatusLong(nextJob || t('agentStatusIdle').replace('{type}','...').replace('{lang}','...').replace('{time}','...'));
+                setAgentStatusLong(nextJob);
             } else {
                 setAgentStatusLong(t('agentStatusDisabled'));
             }
@@ -277,7 +299,7 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                  setAgentStatusShort(t('agentStatusRunning').replace('{type}', typeStr).replace('{lang}', runningShortJobs.join(', ')));
             } else if (isAgentShortActive) {
                  const nextJob = findNextShortJob(shortVideoCadence);
-                setAgentStatusShort(nextJob || t('agentStatusIdle').replace('{type}','...').replace('{lang}','...').replace('{time}','...'));
+                setAgentStatusShort(nextJob);
             } else {
                 setAgentStatusShort(t('agentStatusDisabled'));
             }
@@ -289,7 +311,7 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
             const currentHour = now.getHours();
             const currentMinute = now.getMinutes();
 
-            if (isAgentLongActive) {
+            if (isAgentLongActive && longLanguages.length > 0) {
                 const scheduleHours = schedules['pt'].long.slice(0, longVideoCadence);
                 for (const hour of scheduleHours) {
                     const minute = offsets['pt'];
@@ -301,12 +323,13 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                 }
             }
             
-            if (isAgentShortActive) {
-                for (const lang of ['pt', 'en', 'es'] as const) {
-                    const scheduleHours = schedules[lang].short.slice(0, shortVideoCadence);
+            if (isAgentShortActive && shortLanguages.length > 0) {
+                for (const lang of shortLanguages) {
+                    const langKey = lang as 'pt' | 'en' | 'es';
+                    const scheduleHours = schedules[langKey].short.slice(0, shortVideoCadence);
                     for (const hour of scheduleHours) {
-                        const minute = offsets[lang];
-                        const jobKey = `${todayStr}_${lang}_short_${hour}:${minute}`;
+                        const minute = offsets[langKey];
+                        const jobKey = `${todayStr}_${langKey}_short_${hour}:${minute}`;
                         if (currentHour === hour && currentMinute === minute && !lastRuns[jobKey]) {
                             setLastRuns(prev => ({ ...prev, [jobKey]: Date.now() }));
                             runAutomatedShortVideoJob(lang);
@@ -334,7 +357,7 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
             if (startupTimeoutId) clearTimeout(startupTimeoutId);
             if (jobIntervalId) clearInterval(jobIntervalId);
         };
-    }, [isAgentLongActive, isAgentShortActive, longVideoCadence, shortVideoCadence, lastRuns, setLastRuns, runAutomatedLongVideoBatch, runAutomatedShortVideoJob, t, jobsInProgress]);
+    }, [isAgentLongActive, isAgentShortActive, longVideoCadence, shortVideoCadence, lastRuns, setLastRuns, runAutomatedLongVideoBatch, runAutomatedShortVideoJob, t, jobsInProgress, longLanguages, shortLanguages]);
 
     const AgentPanel = ({
         type,
@@ -344,7 +367,9 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
         setCadence,
         status,
         duration,
-        setDuration
+        setDuration,
+        selectedLanguages,
+        setSelectedLanguages
     }: {
         type: 'long' | 'short';
         isActive: boolean;
@@ -354,8 +379,19 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
         status: string;
         duration?: number;
         setDuration?: (val: number) => void;
-    }) => (
-         <div className="p-4 bg-gray-900 border border-teal-700 rounded-lg space-y-4 flex flex-col">
+        selectedLanguages: string[];
+        setSelectedLanguages: (val: string[]) => void;
+    }) => {
+        const toggleLanguage = (lang: string) => {
+            if (selectedLanguages.includes(lang)) {
+                setSelectedLanguages(selectedLanguages.filter(l => l !== lang));
+            } else {
+                setSelectedLanguages([...selectedLanguages, lang]);
+            }
+        };
+
+        return (
+         <div className="p-4 bg-gray-900 border border-teal-700 rounded-lg space-y-4 flex flex-col h-full">
             <div className="flex items-start gap-3">
                 <BotIcon className="h-6 w-6 text-teal-400 flex-shrink-0 mt-1" />
                 <div>
@@ -373,6 +409,27 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                             {isActive ? t('agentStatusActive') : t('agentStatusInactive')}
                         </span>
                     </label>
+                </div>
+
+                {/* Language Selector */}
+                <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium text-gray-200">{t('selectLanguage')}:</label>
+                    <div className="flex gap-2">
+                        {['pt', 'en', 'es'].map(lang => (
+                            <button
+                                key={lang}
+                                onClick={() => toggleLanguage(lang)}
+                                disabled={!isActive}
+                                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all border ${
+                                    selectedLanguages.includes(lang)
+                                        ? 'bg-teal-600 border-teal-500 text-white'
+                                        : 'bg-gray-700 border-gray-600 text-gray-400 hover:bg-gray-600'
+                                } disabled:opacity-50 disabled:cursor-not-allowed flex-1`}
+                            >
+                                {lang.toUpperCase()}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -426,7 +483,8 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                 </div>
             </div>
         </div>
-    );
+        );
+    };
 
     const IntegrationCard = ({
         platform,
@@ -481,6 +539,8 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                     status={agentStatusLong}
                     duration={agentLongDuration}
                     setDuration={setAgentLongDuration}
+                    selectedLanguages={longLanguages}
+                    setSelectedLanguages={setLongLanguages}
                 />
                 <AgentPanel 
                     type="short"
@@ -489,6 +549,8 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
                     cadence={shortVideoCadence}
                     setCadence={setShortVideoCadence}
                     status={agentStatusShort}
+                    selectedLanguages={shortLanguages}
+                    setSelectedLanguages={setShortLanguages}
                 />
             </div>
             <p className="text-center text-xs text-gray-400">{t('agentKeepTabOpen')}</p>
