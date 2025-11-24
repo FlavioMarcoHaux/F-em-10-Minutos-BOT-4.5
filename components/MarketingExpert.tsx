@@ -118,7 +118,6 @@ export const MarketingExpert: React.FC<MarketingExpertProps> = ({ history, setHi
     
     // Derived state for easier access
     const currentStatus = generationStatus[contentType];
-    const isAnyMediaGenerating = currentStatus.isAudioLoading || currentStatus.isVideoLoading || currentStatus.isImageLoading || currentStatus.isFetchingVideo;
     const isLongKitBusy = Object.values(generationStatus.long).some(s => typeof s === 'boolean' && s);
     const isShortKitBusy = Object.values(generationStatus.short).some(s => typeof s === 'boolean' && s);
 
@@ -563,7 +562,7 @@ export const MarketingExpert: React.FC<MarketingExpertProps> = ({ history, setHi
                                  {/* Audio */}
                                 <div className="p-4 bg-gray-900 rounded-lg space-y-2 flex flex-col">
                                      <h4 className="font-bold text-gray-200">{t('marketingAudio')}</h4>
-                                     <button onClick={handleGenerateAudio} disabled={isAnyMediaGenerating} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
+                                     <button onClick={handleGenerateAudio} disabled={currentStatus.isAudioLoading} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
                                          {currentStatus.isAudioLoading ? <><SpinnerIcon /> {t('generatingAudio')}</> : t('generateAudio')}
                                      </button>
                                      <div className="flex-grow pt-2">
@@ -588,7 +587,7 @@ export const MarketingExpert: React.FC<MarketingExpertProps> = ({ history, setHi
                                  {/* Image */}
                                 <div className="p-4 bg-gray-900 rounded-lg space-y-2 flex flex-col">
                                     <h4 className="font-bold text-gray-200">{t('generateImage')}</h4>
-                                    <button onClick={handleGenerateImage} disabled={isAnyMediaGenerating} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
+                                    <button onClick={handleGenerateImage} disabled={currentStatus.isImageLoading} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
                                         {currentStatus.isImageLoading ? <><SpinnerIcon /> {t('generatingImage')}</> : t('generateImage')}
                                     </button>
                                     <div className="flex-grow pt-2">
@@ -606,7 +605,7 @@ export const MarketingExpert: React.FC<MarketingExpertProps> = ({ history, setHi
                                  {/* Video */}
                                 <div className="p-4 bg-gray-900 rounded-lg space-y-2 flex flex-col">
                                     <h4 className="font-bold text-gray-200">{t('generateVideo')}</h4>
-                                     <button onClick={handleGenerateVideo} disabled={isAnyMediaGenerating || !apiKeySelected} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
+                                     <button onClick={handleGenerateVideo} disabled={currentStatus.isVideoLoading || !apiKeySelected} className="w-full flex items-center justify-center bg-sky-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-sky-700 disabled:bg-gray-600">
                                          {currentStatus.isVideoLoading ? <><SpinnerIcon /> {t('generatingVideo')}</> : t('generateVideo')}
                                      </button>
                                      <div className="flex-grow pt-2">

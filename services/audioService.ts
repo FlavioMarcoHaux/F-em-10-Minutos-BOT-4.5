@@ -1,5 +1,6 @@
 import { ai } from './geminiClient';
 import { writeChunkToStream } from '../utils/opfsUtils';
+import { createWavHeader } from '../utils/audio';
 
 export interface MultiSpeakerConfig {
     speakers: { name: string; voice: string }[];
@@ -86,11 +87,20 @@ export const generateSpeech = async (
     const blocks = parseDialogueIntoChunks(text);
     const totalBlocks = blocks.length;
     let processedBlocks = 0;
+    
+    // Track total PCM bytes for the WAV header
+    let totalPcmBytes = 0;
 
     // Open writable stream if OPFS is used
     let writable: FileSystemWritableFileStream | null = null;
     if (opfsFileHandle) {
         writable = await opfsFileHandle.createWritable({ keepExistingData: false });
+        
+        // Write a PLACEHOLDER header (44 bytes) that we will overwrite later.
+        // Size 0 for now.
+        const placeholderHeaderBlob = createWavHeader(0, 1, 24000, 16);
+        const headerBytes = new Uint8Array(await placeholderHeaderBlob.arrayBuffer());
+        await writeChunkToStream(writable, headerBytes);
     }
 
     for (const block of blocks) {
@@ -131,6 +141,7 @@ export const generateSpeech = async (
 
                 if (writable) {
                     await writeChunkToStream(writable, bytes);
+                    totalPcmBytes += bytes.length;
                 } else if (callbacks?.onChunk) {
                     callbacks.onChunk(bytes);
                 }
@@ -152,6 +163,20 @@ export const generateSpeech = async (
     }
 
     if (writable) {
+        // CORRECTION PHASE:
+        // We need to go back to the beginning of the file and write the REAL header 
+        // with the correct totalPcmBytes size so the file is playable.
+        try {
+            const realHeaderBlob = createWavHeader(totalPcmBytes, 1, 24000, 16);
+            const realHeaderBytes = new Uint8Array(await realHeaderBlob.arrayBuffer());
+            
+            // Seek to the beginning
+            await writable.seek(0);
+            await writeChunkToStream(writable, realHeaderBytes);
+        } catch (e) {
+            console.error("Error writing WAV header:", e);
+        }
+        
         await writable.close();
     }
 
