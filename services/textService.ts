@@ -11,16 +11,19 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
     const targetLang = langMap[language] || 'Inglês';
 
-    // --- NEW DURATION LOGIC (Word Count based) ---
-    // Average speaking rate for hypnosis/prayer: ~120 words per minute.
-    const WORDS_PER_MINUTE = 120;
+    // Channel Name Logic for CTA
+    const channelName = language === 'pt' ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes';
+
+    // --- DURATION LOGIC (Word Count based) ---
+    // Calibrated to 160 WPM to ensure audio duration matches target.
+    // 5 min = 800 words. 10 min = 1600 words.
+    const WORDS_PER_MINUTE = 160;
     const totalTargetWords = duration * WORDS_PER_MINUTE;
     
-    // Gemini Flash output limit is somewhat generous, but to ensure quality and prevent cut-offs,
-    // we limit each generation block to ~800 words (approx 6-7 minutes of audio).
+    // We split into blocks to ensure the model doesn't lose coherence.
     const MAX_WORDS_PER_BLOCK = 800;
     
-    const numIterations = Math.ceil(totalTargetWords / MAX_WORDS_PER_BLOCK);
+    const numIterations = Math.max(1, Math.ceil(totalTargetWords / MAX_WORDS_PER_BLOCK));
     const targetWordsPerBlock = Math.round(totalTargetWords / numIterations);
 
     let fullPrayer = "";
@@ -32,6 +35,47 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
         const isFirst = i === 0;
         const isLast = i === numIterations - 1;
         
+        // --- INSTRUCTION STACKING ARCHITECTURE ---
+        // Instead of choosing ONE instruction, we stack them based on the phase.
+        // This ensures a 1-block prayer gets Start + Body + End instructions.
+        
+        const instructionStack: string[] = [];
+
+        // 1. PHASE: OPENING (Always for Block 0)
+        if (isFirst) {
+            instructionStack.push(`
+            - PHASE: INDUCTION & HOOK (Opening)
+            - Start with a 'Hypnotic Hook': A provocative question or deep validation of the user's pain to grab attention immediately (First 30s).
+            - Establish the Biblical Archetype or Metaphor for this session early on.
+            `);
+        } else {
+             instructionStack.push(`
+            - PHASE: CONTINUATION
+            - Continue the narrative flow seamlessly from the previous block. Do not repeat greetings.
+             `);
+        }
+
+        // 2. PHASE: DEEPENING (Body Content - Needed for ALL blocks to add density)
+        instructionStack.push(`
+        - PHASE: DEEPENING & THERAPY
+        - Use NLP loops, sensory descriptions (VAK), and embedded commands.
+        - Biblical metaphors (David/Solomon/Jesus) applied to modern psychology.
+        - Expand on the theme: "${prompt || 'Divine Connection'}". 
+        - BE VERBOSE AND DESCRIPTIVE. Do not rush.
+        `);
+
+        // 3. PHASE: CLOSING (Always for the Last Block)
+        if (isLast) {
+            instructionStack.push(`
+            - PHASE: RESOLUTION & CALL TO ACTION (CTA)
+            - Anchor the feelings of peace and resolution.
+            - CRITICAL: Before the final blessing, the speaker MUST explicitly ask the listener to subscribe to the channel "${channelName}" to continue their spiritual journey. This request must be warm and integrated into the dialogue.
+            - End with a final blessing.
+            `);
+        }
+
+        const specificInstructions = instructionStack.join("\n");
+
         const systemInstruction = `
         You are a Master of Guided Prayer and Erickson Hypnosis.
         Your goal is to write a DEEPLY THERAPEUTIC dialogue script.
@@ -40,14 +84,11 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
         1. CHARACTERS: The dialogue MUST be exclusively between "Roberta Erickson" (Voice: Aoede, Soft, NLP Guide) and "Milton Dilts" (Voice: Enceladus, Deep, Hypnotic Voice).
         2. FORMAT: Always start lines with "Roberta Erickson:" or "Milton Dilts:". Do NOT use other names.
         3. LANGUAGE: Write strictly in ${targetLang}.
-        4. NO META-DATA: Do NOT write introductions like "Here is the script", summaries, or stage directions in parentheses at the start of lines. Just the dialogue.
-        5. DENSITY: Write extensive, rich, poetic text. Use sensory descriptions (VAK), loops, and embedded commands.
-        6. GOLDEN THREAD: The central theme "${prompt || 'Divine Connection'}" must be woven into every paragraph to maintain focus.
+        4. NO META-DATA: Do NOT write introductions, summaries, or stage directions. Just the dialogue.
+        5. TONE: Hypnotic, slow, rhythmic, spiritual but grounded in psychology.
         
-        STRUCTURAL GOAL FOR THIS BLOCK (Part ${i + 1} of ${numIterations}):
-        ${isFirst ? "- Start with a 'Hypnotic Hook': A provocative question or deep validation of the user's pain to grab attention immediately (First 30s). Then move to induction." : ""}
-        ${!isFirst && !isLast ? "- Deepening: Biblical metaphors (David/Solomon/Jesus), PNL ressignification, sensory immersion. Expand on the theme." : ""}
-        ${isLast ? "- Anchor the feeling, gratitude, and slowly return. End with a blessing." : ""}
+        INSTRUCTIONS FOR THIS BLOCK (Part ${i + 1} of ${numIterations}):
+        ${specificInstructions}
         
         ${!isFirst ? `CONTEXT FROM PREVIOUS BLOCK: "...${lastContext.slice(-300)}"` : ""}
         `;
@@ -56,7 +97,7 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
         Write Part ${i + 1}/${numIterations} of the prayer about "${prompt}".
         
         LENGTH CONSTRAINT: Write approximately ${targetWordsPerBlock} words for this section.
-        This is crucial to fill the time slot. Be verbose, detailed, and slow-paced.
+        This is crucial to fit the time limit. Do not summarize. Be verbose.
         
         Keep the flow continuous. Start directly with a character name.
         `;
@@ -65,7 +106,7 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
             const result = await ai.models.generateContent({
                 model,
                 contents: userPrompt,
-                config: { systemInstruction, temperature: 0.7 } // Creative but coherent
+                config: { systemInstruction, temperature: 0.7 } 
             });
             
             const text = result.text || "";
@@ -73,7 +114,6 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
             lastContext = text;
         } catch (e) {
             console.error(`Error in block ${i}:`, e);
-            // If one block fails, we return what we have so far rather than crashing
             break; 
         }
     }
@@ -82,8 +122,9 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
 };
 
 export const generateShortPrayer = async (prompt: string, language: string): Promise<string> => {
-    // Short prayer (pills) default to 5 minutes logic (approx 600 words)
-    return generateGuidedPrayer(prompt, language, 5); 
+    // "Pills" are meant to be short. 5 minutes (800 words) might be too long for a "Pill".
+    // Setting to 2 minutes (~320 words) for a punchy, short prayer.
+    return generateGuidedPrayer(prompt, language, 2); 
 };
 
 // --- MARKETING ASSETS GENERATION ---
@@ -127,7 +168,6 @@ export const generateYouTubeLongPost = async (theme: string, subthemes: string[]
     const isES = language === 'es';
     
     // Channel Name logic
-    // We keep the English name for ES to maintain brand identity, but the content must be Spanish.
     const channelName = isPT ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'; 
 
     // Define Static Links Blocks based on Language
