@@ -1,8 +1,97 @@
 
+
 import { ai } from './geminiClient';
 import { YouTubeLongPost, SocialMediaPost } from '../types';
 
 // --- CORE GENERATION FUNCTIONS ---
+
+export interface UserContext {
+    name?: string;
+    birthDate?: string;
+    birthPlace?: string;   // Changed from location
+    currentPlace?: string; // New
+}
+
+// PIC: Deep Research Function
+const getSpiritualDossier = async (userData: UserContext, language: string, onStatusUpdate?: (status: string) => void): Promise<string> => {
+    const model = 'gemini-2.5-flash';
+    const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
+    const targetLang = langMap[language] || 'Inglês';
+
+    if (onStatusUpdate) onStatusUpdate('picLoadingResearch');
+
+    const prompt = `
+    Deep Research Task (PIC - Principle of Conscious Information):
+    
+    Target User Profile:
+    - Name: ${userData.name || "Unknown"}
+    - Birth Date: ${userData.birthDate || "Not provided"}
+    - Origin (Roots): ${userData.birthPlace || "Unknown"}
+    - Current Context (Soil): ${userData.currentPlace || "Unknown"}
+
+    INSTRUCTIONS:
+    1. SEARCH (using Google Search) for:
+       - The spiritual, etymological, and biblical meaning of the Name.
+       ${userData.birthDate ? `- The generational context or "Spirit of the Time" for the birth date: ${userData.birthDate}.` : ""}
+       - The spiritual atmosphere, history, or "roots" of the Birth Place (${userData.birthPlace}).
+       - The spiritual atmosphere, challenges, or "climate" of the Current Place (${userData.currentPlace}).
+    
+    2. ANALYZE THE JOURNEY (The "Exodus"):
+       - Connect the Roots (Birth) to the Soil (Current). How does where they came from empower them for where they are?
+       - Find a metaphor for this movement.
+       - Identify a biblical archetype fitting this trajectory.
+
+    OUTPUT:
+    Return a concise but deep paragraph (in ${targetLang}) summarizing this "Soul Dossier".
+    Start with: "CONTEXTO ESPIRITUAL (PIC):"
+    `;
+
+    try {
+        const result = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+                tools: [{ googleSearch: {} }] // Enable Grounding
+            }
+        });
+
+        // The result will contain the synthesized text based on the search
+        let dossier = result.text || "";
+        
+        // Append grounding links if available (optional, but good for "truth")
+        // For the prayer generation, we mainly need the text content.
+        
+        return dossier;
+    } catch (e) {
+        console.error("Deep Research Failed", e);
+        return `Context: User ${userData.name}. Journey from ${userData.birthPlace || 'unknown'} to ${userData.currentPlace || 'unknown'}.`; // Fallback
+    }
+};
+
+export const generatePersonalizedPrayer = async (
+    userData: UserContext, 
+    language: string, 
+    duration: number,
+    onStatusUpdate?: (status: string) => void
+): Promise<string> => {
+    // 1. Get the Deep Research Dossier
+    const dossier = await getSpiritualDossier(userData, language, onStatusUpdate);
+    
+    if (onStatusUpdate) onStatusUpdate('picLoadingSynthesizing');
+
+    // 2. Use the Dossier as the "Prompt" for the existing engine
+    // We wrap it to ensure the model understands this is a dossier, not just a simple theme.
+    const augmentedPrompt = `
+    [DEEP PERSONALIZATION REQUEST]
+    Use the following Deep Research Dossier to customize the prayer.
+    Integrate the specific meanings of the name, the journey from origin to current location, and the date significance (if present) into the Hypnotic Script.
+    
+    ${dossier}
+    `;
+
+    // 3. Call the standard generator with the augmented prompt
+    return generateGuidedPrayer(augmentedPrompt, language, duration);
+};
 
 export const generateGuidedPrayer = async (prompt: string, language: string, duration: number = 10): Promise<string> => {
     const model = 'gemini-2.5-flash'; // Using Flash for high-volume text generation
@@ -47,6 +136,7 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
             - PHASE: INDUCTION & HOOK (Opening)
             - Start with a 'Hypnotic Hook': A provocative question or deep validation of the user's pain to grab attention immediately (First 30s).
             - Establish the Biblical Archetype or Metaphor for this session early on.
+            - IF A PERSONAL DOSSIER IS PROVIDED: Use the name, location energy, and specific meaning immediately to create rapport.
             `);
         } else {
              instructionStack.push(`
@@ -60,7 +150,7 @@ export const generateGuidedPrayer = async (prompt: string, language: string, dur
         - PHASE: DEEPENING & THERAPY
         - Use NLP loops, sensory descriptions (VAK), and embedded commands.
         - Biblical metaphors (David/Solomon/Jesus) applied to modern psychology.
-        - Expand on the theme: "${prompt || 'Divine Connection'}". 
+        - Expand on the theme/dossier provided: "${prompt || 'Divine Connection'}". 
         - BE VERBOSE AND DESCRIPTIVE. Do not rush.
         `);
 

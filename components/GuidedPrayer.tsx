@@ -1,11 +1,12 @@
 
+
 import React, { useState, useEffect, useContext, useRef } from 'react';
 import { generateSpeech, generateImageFromPrayer, generateVideo, createMediaPromptFromPrayer } from '../services/geminiService';
 import { SpinnerIcon, DownloadIcon } from './icons';
 import { LanguageContext, LanguageContextType } from '../context';
 import { AspectRatio } from '../types';
 import { usePersistentState, usePersistentBlob } from '../hooks/usePersistentState';
-import { generateGuidedPrayer } from '../services/geminiService';
+import { generateGuidedPrayer, generatePersonalizedPrayer, UserContext } from '../services/geminiService';
 import { createOPFSFile, getOPFSFileAsBlob } from '../utils/opfsUtils';
 
 interface PrayerGeneratorProps {
@@ -21,6 +22,13 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
     const [prompt, setPrompt] = usePersistentState(`${storageKeyPrefix}_prompt`, '');
     const [duration, setDuration] = usePersistentState<number>(`${storageKeyPrefix}_duration`, 10);
     
+    // PIC State
+    const [picName, setPicName] = usePersistentState(`${storageKeyPrefix}_picName`, '');
+    const [picDate, setPicDate] = usePersistentState(`${storageKeyPrefix}_picDate`, '');
+    const [picBirthPlace, setPicBirthPlace] = usePersistentState(`${storageKeyPrefix}_picBirthPlace`, '');
+    const [picCurrentPlace, setPicCurrentPlace] = usePersistentState(`${storageKeyPrefix}_picCurrentPlace`, '');
+    const [picStatus, setPicStatus] = useState('');
+
     // Persistent Blobs
     const [audioUrl, , setAudioBlob, isAudioLoadingFromDB] = usePersistentBlob(`${storageKeyPrefix}_audio`);
     const [imageUrl, , setImageBlob, isImageLoadingFromDB] = usePersistentBlob(`${storageKeyPrefix}_image`);
@@ -69,6 +77,7 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
         setIsLoading(true);
         setError('');
         setPrayer('');
+        setPicStatus('');
         // Clear previous media
         setAudioBlob(null);
         setAudioError('');
@@ -76,14 +85,39 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
         setVideoError('');
         setImageBlob(null);
         setImageError('');
+        
         try {
-            const result = await prayerGeneratorFn(useRandomTheme ? '' : prompt, language, duration);
+            let result = '';
+            
+            // PIC LOGIC: If at least one relevant field is filled
+            const isPicActive = (picName || picDate || picBirthPlace || picCurrentPlace) && !useRandomTheme;
+            
+            if (isPicActive && storageKeyPrefix === 'guidedPrayer') {
+                const userData: UserContext = {
+                    name: picName,
+                    birthDate: picDate,
+                    birthPlace: picBirthPlace,
+                    currentPlace: picCurrentPlace
+                };
+                // Use the specialized personalized generator
+                result = await generatePersonalizedPrayer(
+                    userData, 
+                    language, 
+                    duration, 
+                    (statusKey) => setPicStatus(t(statusKey))
+                );
+            } else {
+                // Fallback to standard generator
+                result = await prayerGeneratorFn(useRandomTheme ? '' : prompt, language, duration);
+            }
+            
             setPrayer(result);
         } catch (e) {
             setError(handleRateLimitError(e) ? t('errorRateLimit') : t('prayerError'));
             console.error(e);
         } finally {
             setIsLoading(false);
+            setPicStatus('');
         }
     };
     
@@ -220,6 +254,9 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
         }
     };
 
+    // Determine if PIC mode is available (at least one field filled)
+    const isPicMode = (picName || picDate || picBirthPlace || picCurrentPlace) && storageKeyPrefix === 'guidedPrayer';
+
     return (
         <div className="bg-gray-800 p-6 rounded-xl shadow-lg animate-fade-in space-y-6">
             <div>
@@ -233,7 +270,7 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
                     disabled={isLoading}
                     className="w-full flex items-center justify-center bg-teal-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-teal-700 transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed transform hover:scale-105"
                 >
-                    {isLoading ? (<><SpinnerIcon />{t('prayerLoading')}</>) : (t('prayerChoseYouButton'))}
+                    {isLoading && !isPicMode ? (<><SpinnerIcon />{t('prayerLoading')}</>) : (t('prayerChoseYouButton'))}
                 </button>
 
                 <div className="relative">
@@ -244,6 +281,50 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
                         <span className="px-2 bg-gray-800 text-gray-400">{t('orText')}</span>
                     </div>
                 </div>
+
+                {/* PIC Form (Only for Guided Prayer) */}
+                {storageKeyPrefix === 'guidedPrayer' && (
+                    <div className="bg-gray-700/30 p-4 rounded-lg border border-amber-500/20 space-y-3">
+                        <h3 className="text-amber-400/80 text-sm font-semibold flex items-center gap-2">
+                             {t('picTitle')}
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input 
+                                type="text" 
+                                placeholder={t('picNamePlaceholder')} 
+                                value={picName}
+                                onChange={(e) => setPicName(e.target.value)}
+                                className="bg-gray-800 text-white placeholder-gray-500 p-2 rounded-md border border-gray-600 focus:border-amber-500/50 focus:outline-none text-sm md:col-span-2"
+                            />
+                            
+                            <input 
+                                type="text" 
+                                placeholder={t('picBirthPlacePlaceholder')} 
+                                value={picBirthPlace}
+                                onChange={(e) => setPicBirthPlace(e.target.value)}
+                                className="bg-gray-800 text-white placeholder-gray-500 p-2 rounded-md border border-gray-600 focus:border-amber-500/50 focus:outline-none text-sm"
+                            />
+
+                             <input 
+                                type="text" 
+                                placeholder={t('picCurrentPlacePlaceholder')} 
+                                value={picCurrentPlace}
+                                onChange={(e) => setPicCurrentPlace(e.target.value)}
+                                className="bg-gray-800 text-white placeholder-gray-500 p-2 rounded-md border border-gray-600 focus:border-amber-500/50 focus:outline-none text-sm"
+                            />
+
+                            <div className="md:col-span-2 relative">
+                                <label className="block text-xs text-gray-400 mb-1 ml-1">{t('picDatePlaceholderOptional')}</label>
+                                <input 
+                                    type="date" 
+                                    value={picDate}
+                                    onChange={(e) => setPicDate(e.target.value)}
+                                    className="w-full bg-gray-800 text-white placeholder-gray-500 p-2 rounded-md border border-gray-600 focus:border-amber-500/50 focus:outline-none text-sm"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 <div>
                     <label className="block text-sm font-medium text-gray-200 mb-2">{t('prayerDefineTheme')}</label>
@@ -275,10 +356,18 @@ export const PrayerGenerator: React.FC<PrayerGeneratorProps> = ({ titleKey, desc
                         )}
                         <button
                             onClick={() => handleGenerate(false)}
-                            disabled={isLoading || !prompt}
-                            className="flex items-center justify-center bg-amber-500 text-gray-900 font-bold py-3 px-6 rounded-lg hover:bg-amber-600 transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed transform hover:scale-105"
+                            disabled={isLoading || (!prompt && !isPicMode)}
+                            className={`flex items-center justify-center font-bold py-3 px-6 rounded-lg transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed transform hover:scale-105 ${
+                                isPicMode 
+                                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg hover:shadow-indigo-500/50' 
+                                    : 'bg-amber-500 text-gray-900 hover:bg-amber-600'
+                            }`}
                         >
-                            {isLoading ? (<><SpinnerIcon />{t('prayerLoading')}</>) : (t('prayerButton'))}
+                            {isLoading ? (
+                                <><SpinnerIcon /> {picStatus ? picStatus : t('prayerLoading')}</>
+                            ) : (
+                                isPicMode ? t('picButton') : t('prayerButton')
+                            )}
                         </button>
                     </div>
                 </div>
