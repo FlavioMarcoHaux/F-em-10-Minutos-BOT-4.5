@@ -8,31 +8,28 @@ export interface MultiSpeakerConfig {
 }
 
 // --- SURGICAL TEXT CLEANING (FIX FOR DISTORTION, ACCENT & META-INFO) ---
-
 const cleanTextForSpeech = (text: string): string => {
     return text
-        // 1. Remove Stage Directions & Meta-info: (Softly), [Pause], *whispers*, (Voz calma)
+        // 1. Remove Stage Directions & Meta-info
         .replace(/\([^)]*\)/g, "")
         .replace(/\[[^\]]*\]/g, "")
         .replace(/\*[^*]*\*/g, "")
         .replace(/_[^_]*_/g, "")
         
-        // 2. Remove Emojis (The primary cause of "robotic/pipe" distortion)
+        // 2. Remove Emojis and non-standard symbols
         .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF])/g, '')
         
-        // 3. Remove Special Symbols that trip up TTS engines
+        // 3. Remove Special Symbols
         .replace(/[#$@^&\\|<>~*]/g, "")
         
         // 4. Normalize quotes and dashes
         .replace(/[""]/g, "")
         .replace(/[-–—]/g, " ")
         
-        // 5. Clean up extra whitespace resulting from removals
+        // 5. Clean up extra whitespace
         .replace(/\s+/g, " ")
         .trim();
 };
-
-// --- DIALOGUE PARSING ---
 
 const parseDialogueIntoChunks = (text: string): { speaker: string; text: string }[] => {
     const lines = text.split('\n');
@@ -61,7 +58,7 @@ const parseDialogueIntoChunks = (text: string): { speaker: string; text: string 
     }
 
     const finalChunks: { speaker: string; text: string }[] = [];
-    const MAX_CHARS = 800; // Reduced chunk size for better stability
+    const MAX_CHARS = 700; 
 
     for (const chunk of chunks) {
         if (chunk.text.length > MAX_CHARS) {
@@ -95,11 +92,8 @@ export const generateSpeech = async (
     },
     opfsFileHandle?: FileSystemFileHandle
 ): Promise<void> => {
-    // Re-initialize AI client to ensure fresh API key context
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    
-    // Model changed to 'gemini-2.5-flash-native-audio-preview-09-2025' to support Aoede and Enceladus voices correctly
-    const model = 'gemini-2.5-flash-native-audio-preview-09-2025'; 
+    const model = 'gemini-2.5-flash-preview-tts'; 
     
     const blocks = parseDialogueIntoChunks(text);
     const totalBlocks = blocks.length;
@@ -116,18 +110,20 @@ export const generateSpeech = async (
 
     for (const block of blocks) {
         try {
-            // Defaulting to requested voices
+            // MANTENDO COERÊNCIA PIC: Roberta=Aoede, Milton=Enceladus
             let voiceName = 'Aoede'; 
+            const speakerLower = block.speaker.toLowerCase();
+            
             if (multiSpeakerConfig) {
                 const speakerMap = multiSpeakerConfig.speakers.find(s => 
-                    block.speaker.toLowerCase().includes(s.name.toLowerCase().split(' ')[0])
+                    speakerLower.includes(s.name.toLowerCase().split(' ')[0])
                 );
                 if (speakerMap) {
-                    voiceName = speakerMap.voice; // Should be Aoede or Enceladus
+                    voiceName = speakerMap.voice;
                 }
-            } else if (block.speaker.toLowerCase().includes("milton")) {
+            } else if (speakerLower.includes("milton") || speakerLower.includes("dilts")) {
                 voiceName = "Enceladus";
-            } else if (block.speaker.toLowerCase().includes("roberta")) {
+            } else if (speakerLower.includes("roberta") || speakerLower.includes("erickson")) {
                 voiceName = "Aoede";
             }
 
@@ -137,10 +133,13 @@ export const generateSpeech = async (
                 continue;
             }
 
-            // Using generateContent with specific audio config for the Native Audio model
+            // PROMPT OTIMIZADO: Focado em fluidez orgânica e expressividade humana real.
+            // Removidos termos que forçavam a IA a falar de forma "arrastada".
+            const ttsPrompt = `Read this with the natural cadence of a human storyteller. Use meaningful pauses between sentences for a therapeutic and reflective feel, but keep the speech clear, rhythmic, and fluid. Do not speak unnaturally slowly or distort the voice. Text: ${cleanedText}`;
+
             const response = await ai.models.generateContent({
                 model,
-                contents: [{ parts: [{ text: cleanedText }] }],
+                contents: [{ parts: [{ text: ttsPrompt }] }],
                 config: {
                     responseModalities: [Modality.AUDIO],
                     speechConfig: {
@@ -155,7 +154,6 @@ export const generateSpeech = async (
             const audioData = audioPart?.inlineData?.data;
             
             if (audioData) {
-                // Manual base64 decode as per guidelines
                 const binaryString = atob(audioData);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -170,8 +168,6 @@ export const generateSpeech = async (
                 if (callbacks?.onChunk) {
                     callbacks.onChunk(bytes);
                 }
-            } else {
-                console.warn(`No audio data returned for block ${processedBlocks + 1}`);
             }
 
             processedBlocks++;
@@ -179,29 +175,28 @@ export const generateSpeech = async (
                 callbacks.onProgress(Math.round((processedBlocks / totalBlocks) * 100));
             }
 
-            // Brief delay to prevent rate limit (429) errors
-            await new Promise(r => setTimeout(r, 250)); 
+            // Delay de segurança contra rate limit
+            await new Promise(r => setTimeout(r, 200)); 
 
         } catch (e: any) {
-            console.error(`Audio Generation Error (Block ${processedBlocks + 1}):`, e);
+            console.error(`TTS Generation Error (Block ${processedBlocks + 1}):`, e);
             if (callbacks?.onError) {
-                const errorMsg = e.message || "Internal error";
-                callbacks.onError(`Error generating block ${processedBlocks + 1}: ${errorMsg}`);
+                const errorInfo = e.message || "Internal Service Error";
+                callbacks.onError(`Error generating block ${processedBlocks + 1}: ${errorInfo}`);
             }
-            break; // Stop on first fatal error
+            break; 
         }
     }
 
     if (writable) {
         try {
-            // Finalize header with correct data size
             const realHeaderBlob = createWavHeader(totalPcmBytes, 1, 24000, 16);
             const realHeaderBytes = new Uint8Array(await realHeaderBlob.arrayBuffer());
             await writable.seek(0);
             await writeChunkToStream(writable, realHeaderBytes);
             await writable.close();
         } catch (e) {
-            console.error("Error finalizing WAV file:", e);
+            console.error("Error finalizing WAV file in OPFS:", e);
         }
     }
 
