@@ -346,17 +346,16 @@ export const BotAgent: React.FC<BotAgentProps> = ({ history, setHistory }) => {
         let startupTimeoutId: number | undefined;
 
         if (isAgentLongActive || isAgentShortActive) {
-            // Fix: Use window.setTimeout to ensure browser number type is returned
-            startupTimeoutId = window.setTimeout(() => {
+            startupTimeoutId = setTimeout(() => {
                 checkSchedule();
                 jobIntervalId = window.setInterval(checkSchedule, 30000);
             }, 10000);
         }
 
         return () => {
-            window.clearInterval(statusInterval);
-            if (startupTimeoutId) window.clearTimeout(startupTimeoutId);
-            if (jobIntervalId) window.clearInterval(jobIntervalId);
+            clearInterval(statusInterval);
+            if (startupTimeoutId) clearTimeout(startupTimeoutId);
+            if (jobIntervalId) clearInterval(jobIntervalId);
         };
     }, [isAgentLongActive, isAgentShortActive, longVideoCadence, shortVideoCadence, lastRuns, setLastRuns, runAutomatedLongVideoBatch, runAutomatedShortVideoJob, t, jobsInProgress, longLanguages, shortLanguages]);
 

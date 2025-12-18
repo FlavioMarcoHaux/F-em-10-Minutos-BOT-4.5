@@ -1,5 +1,4 @@
-
-import { GoogleGenAI, Modality } from '@google/genai';
+import { ai } from './geminiClient';
 import { writeChunkToStream } from '../utils/opfsUtils';
 import { createWavHeader } from '../utils/audio';
 
@@ -7,51 +6,53 @@ export interface MultiSpeakerConfig {
     speakers: { name: string; voice: string }[];
 }
 
+// Helper to clean stage directions from the start of lines for TTS
 const cleanTextForSpeech = (text: string): string => {
-    return text
-        .replace(/\([^)]*\)/g, "")
-        .replace(/\[[^\]]*\]/g, "")
-        .replace(/\*[^*]*\*/g, "")
-        .replace(/_[^_]*_/g, "")
-        .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF])/g, '')
-        .replace(/[#$@^&\\|<>~*]/g, "")
-        .replace(/[""]/g, "")
-        .replace(/[-–—]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+    // Removes (Softly), [Pause], etc., only if they appear at the start of a line or sentence
+    // Preserves internal emphasis like *stars* or (biblical references) inside the sentence.
+    return text.replace(/^\s*[\(\[][^)\]]*[\)\]]\s*/gm, "");
 };
+
+// --- SPEECH GENERATION (BLADE RUNNER ARCHITECTURE) ---
 
 const parseDialogueIntoChunks = (text: string): { speaker: string; text: string }[] => {
     const lines = text.split('\n');
     const chunks: { speaker: string; text: string }[] = [];
-    let currentSpeaker = 'Narrator';
+    let currentSpeaker = 'Narrator'; // Default
     let currentBuffer = '';
 
+    // Regex to detect "Name:" pattern
     const speakerRegex = /^([A-Za-zÀ-ÖØ-öø-ÿ ]+):/i;
 
     for (const line of lines) {
         const match = line.match(speakerRegex);
         if (match) {
+            // If we have a buffer for the previous speaker, push it
             if (currentBuffer.trim()) {
                 chunks.push({ speaker: currentSpeaker, text: currentBuffer.trim() });
             }
+            // Start new speaker
             currentSpeaker = match[1].trim();
             currentBuffer = line.replace(speakerRegex, '').trim();
         } else {
+            // Append to current speaker
             if (line.trim()) {
                 currentBuffer += ' ' + line.trim();
             }
         }
     }
+    // Push final buffer
     if (currentBuffer.trim()) {
         chunks.push({ speaker: currentSpeaker, text: currentBuffer.trim() });
     }
 
+    // Further split very long chunks to avoid TTS timeouts
     const finalChunks: { speaker: string; text: string }[] = [];
-    const MAX_CHARS = 600; 
+    const MAX_CHARS = 1500; 
 
     for (const chunk of chunks) {
         if (chunk.text.length > MAX_CHARS) {
+            // Split by sentences roughly
             const sentences = chunk.text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [chunk.text];
             let temp = '';
             for (const sentence of sentences) {
@@ -82,17 +83,21 @@ export const generateSpeech = async (
     },
     opfsFileHandle?: FileSystemFileHandle
 ): Promise<void> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const model = 'gemini-2.5-flash-preview-tts'; 
-    
+    const model = 'gemini-2.5-flash-preview-tts'; // Correct TTS model
     const blocks = parseDialogueIntoChunks(text);
     const totalBlocks = blocks.length;
     let processedBlocks = 0;
+    
+    // Track total PCM bytes for the WAV header
     let totalPcmBytes = 0;
 
+    // Open writable stream if OPFS is used
     let writable: FileSystemWritableFileStream | null = null;
     if (opfsFileHandle) {
         writable = await opfsFileHandle.createWritable({ keepExistingData: false });
+        
+        // Write a PLACEHOLDER header (44 bytes) that we will overwrite later.
+        // Size 0 for now.
         const placeholderHeaderBlob = createWavHeader(0, 1, 24000, 16);
         const headerBytes = new Uint8Array(await placeholderHeaderBlob.arrayBuffer());
         await writeChunkToStream(writable, headerBytes);
@@ -100,49 +105,34 @@ export const generateSpeech = async (
 
     for (const block of blocks) {
         try {
-            let voiceName = 'Aoede'; 
-            const speakerLower = block.speaker.toLowerCase();
-            
+            // Determine voice
+            let voiceName = 'Aoede'; // Default female
             if (multiSpeakerConfig) {
                 const speakerMap = multiSpeakerConfig.speakers.find(s => 
-                    speakerLower.includes(s.name.toLowerCase().split(' ')[0])
+                    block.speaker.toLowerCase().includes(s.name.toLowerCase().split(' ')[0]) // Match first name
                 );
-                if (speakerMap) {
-                    voiceName = speakerMap.voice;
-                }
-            } else if (speakerLower.includes("milton") || speakerLower.includes("dilts")) {
-                voiceName = "Enceladus";
-            } else if (speakerLower.includes("roberta") || speakerLower.includes("erickson")) {
-                voiceName = "Aoede";
+                if (speakerMap) voiceName = speakerMap.voice;
             }
 
-            const cleanedText = cleanTextForSpeech(block.text);
-            if (!cleanedText.trim()) {
-                processedBlocks++;
-                continue;
-            }
-
-            // INSTRUÇÃO REFINADA: Pedimos fluidez e ritmo humano. 
-            // Retiramos palavras que induzem a IA a ficar "arrastada".
-            const ttsPrompt = `Fale de forma clara, acolhedora e natural, como em uma conversa profunda e tranquila. Mantenha um ritmo humano orgânico, com pausas breves e naturais para respiração. Evite lentidão excessiva ou distorção. Texto: ${cleanedText}`;
+            // Surgical Clean: Remove stage directions from start of speech only
+            const textToSpeak = cleanTextForSpeech(block.text);
+            if (!textToSpeak.trim()) continue;
 
             const response = await ai.models.generateContent({
                 model,
-                contents: [{ parts: [{ text: ttsPrompt }] }],
+                contents: { parts: [{ text: textToSpeak }] },
                 config: {
-                    responseModalities: [Modality.AUDIO],
+                    responseModalities: ['AUDIO'],
                     speechConfig: {
-                        voiceConfig: { 
-                            prebuiltVoiceConfig: { voiceName } 
-                        }
-                    },
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+                    }
                 }
             });
 
-            const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-            const audioData = audioPart?.inlineData?.data;
+            const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
             
             if (audioData) {
+                // Decode Base64 to Uint8Array
                 const binaryString = atob(audioData);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -152,9 +142,7 @@ export const generateSpeech = async (
                 if (writable) {
                     await writeChunkToStream(writable, bytes);
                     totalPcmBytes += bytes.length;
-                }
-                
-                if (callbacks?.onChunk) {
+                } else if (callbacks?.onChunk) {
                     callbacks.onChunk(bytes);
                 }
             }
@@ -164,25 +152,32 @@ export const generateSpeech = async (
                 callbacks.onProgress(Math.round((processedBlocks / totalBlocks) * 100));
             }
 
-            await new Promise(r => setTimeout(r, 150)); 
+            // Small delay to be gentle on rate limits
+            await new Promise(r => setTimeout(r, 100));
 
         } catch (e: any) {
-            console.error(`TTS Error:`, e);
-            if (callbacks?.onError) callbacks.onError(e.message || "TTS Error");
-            break; 
+            console.error("TTS Generation Error on block:", block, e);
+            if (callbacks?.onError) callbacks.onError(`Error generating audio for block ${processedBlocks + 1}`);
+            // Continue to next block to salvage what we can
         }
     }
 
     if (writable) {
+        // CORRECTION PHASE:
+        // We need to go back to the beginning of the file and write the REAL header 
+        // with the correct totalPcmBytes size so the file is playable.
         try {
             const realHeaderBlob = createWavHeader(totalPcmBytes, 1, 24000, 16);
             const realHeaderBytes = new Uint8Array(await realHeaderBlob.arrayBuffer());
+            
+            // Seek to the beginning
             await writable.seek(0);
             await writeChunkToStream(writable, realHeaderBytes);
-            await writable.close();
         } catch (e) {
-            console.error("Error finalizing WAV:", e);
+            console.error("Error writing WAV header:", e);
         }
+        
+        await writable.close();
     }
 
     if (callbacks?.onComplete) callbacks.onComplete();
