@@ -7,26 +7,16 @@ export interface MultiSpeakerConfig {
     speakers: { name: string; voice: string }[];
 }
 
-// --- SURGICAL TEXT CLEANING (FIX FOR DISTORTION, ACCENT & META-INFO) ---
 const cleanTextForSpeech = (text: string): string => {
     return text
-        // 1. Remove Stage Directions & Meta-info
         .replace(/\([^)]*\)/g, "")
         .replace(/\[[^\]]*\]/g, "")
         .replace(/\*[^*]*\*/g, "")
         .replace(/_[^_]*_/g, "")
-        
-        // 2. Remove Emojis and non-standard symbols
         .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF])/g, '')
-        
-        // 3. Remove Special Symbols
         .replace(/[#$@^&\\|<>~*]/g, "")
-        
-        // 4. Normalize quotes and dashes
         .replace(/[""]/g, "")
         .replace(/[-–—]/g, " ")
-        
-        // 5. Clean up extra whitespace
         .replace(/\s+/g, " ")
         .trim();
 };
@@ -58,7 +48,7 @@ const parseDialogueIntoChunks = (text: string): { speaker: string; text: string 
     }
 
     const finalChunks: { speaker: string; text: string }[] = [];
-    const MAX_CHARS = 700; 
+    const MAX_CHARS = 600; 
 
     for (const chunk of chunks) {
         if (chunk.text.length > MAX_CHARS) {
@@ -110,7 +100,6 @@ export const generateSpeech = async (
 
     for (const block of blocks) {
         try {
-            // MANTENDO COERÊNCIA PIC: Roberta=Aoede, Milton=Enceladus
             let voiceName = 'Aoede'; 
             const speakerLower = block.speaker.toLowerCase();
             
@@ -133,9 +122,9 @@ export const generateSpeech = async (
                 continue;
             }
 
-            // PROMPT OTIMIZADO: Focado em fluidez orgânica e expressividade humana real.
-            // Removidos termos que forçavam a IA a falar de forma "arrastada".
-            const ttsPrompt = `Read this with the natural cadence of a human storyteller. Use meaningful pauses between sentences for a therapeutic and reflective feel, but keep the speech clear, rhythmic, and fluid. Do not speak unnaturally slowly or distort the voice. Text: ${cleanedText}`;
+            // INSTRUÇÃO REFINADA: Pedimos fluidez e ritmo humano. 
+            // Retiramos palavras que induzem a IA a ficar "arrastada".
+            const ttsPrompt = `Fale de forma clara, acolhedora e natural, como em uma conversa profunda e tranquila. Mantenha um ritmo humano orgânico, com pausas breves e naturais para respiração. Evite lentidão excessiva ou distorção. Texto: ${cleanedText}`;
 
             const response = await ai.models.generateContent({
                 model,
@@ -175,15 +164,11 @@ export const generateSpeech = async (
                 callbacks.onProgress(Math.round((processedBlocks / totalBlocks) * 100));
             }
 
-            // Delay de segurança contra rate limit
-            await new Promise(r => setTimeout(r, 200)); 
+            await new Promise(r => setTimeout(r, 150)); 
 
         } catch (e: any) {
-            console.error(`TTS Generation Error (Block ${processedBlocks + 1}):`, e);
-            if (callbacks?.onError) {
-                const errorInfo = e.message || "Internal Service Error";
-                callbacks.onError(`Error generating block ${processedBlocks + 1}: ${errorInfo}`);
-            }
+            console.error(`TTS Error:`, e);
+            if (callbacks?.onError) callbacks.onError(e.message || "TTS Error");
             break; 
         }
     }
@@ -196,7 +181,7 @@ export const generateSpeech = async (
             await writeChunkToStream(writable, realHeaderBytes);
             await writable.close();
         } catch (e) {
-            console.error("Error finalizing WAV file in OPFS:", e);
+            console.error("Error finalizing WAV:", e);
         }
     }
 
