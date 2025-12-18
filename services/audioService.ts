@@ -1,3 +1,4 @@
+
 import { ai } from './geminiClient';
 import { writeChunkToStream } from '../utils/opfsUtils';
 import { createWavHeader } from '../utils/audio';
@@ -6,53 +7,64 @@ export interface MultiSpeakerConfig {
     speakers: { name: string; voice: string }[];
 }
 
-// Helper to clean stage directions from the start of lines for TTS
+// --- SURGICAL TEXT CLEANING (FIX FOR DISTORTION, ACCENT & META-INFO) ---
+
 const cleanTextForSpeech = (text: string): string => {
-    // Removes (Softly), [Pause], etc., only if they appear at the start of a line or sentence
-    // Preserves internal emphasis like *stars* or (biblical references) inside the sentence.
-    return text.replace(/^\s*[\(\[][^)\]]*[\)\]]\s*/gm, "");
+    return text
+        // 1. Remove Stage Directions & Meta-info: (Softly), [Pause], *whispers*, (Voz calma)
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\[[^\]]*\]/g, "")
+        .replace(/\*[^*]*\*/g, "")
+        .replace(/_[^_]*_/g, "")
+        
+        // 2. Remove Emojis (The primary cause of "robotic/pipe" distortion)
+        .replace(/([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF])/g, '')
+        
+        // 3. Remove Special Symbols that trip up TTS engines
+        .replace(/[#$@^&\\|<>~*]/g, "")
+        
+        // 4. Normalize quotes and dashes
+        .replace(/[""]/g, "")
+        .replace(/[-–—]/g, " ")
+        
+        // 5. Clean up extra whitespace resulting from removals
+        .replace(/\s+/g, " ")
+        .trim();
 };
 
-// --- SPEECH GENERATION (BLADE RUNNER ARCHITECTURE) ---
+// --- DIALOGUE PARSING ---
 
 const parseDialogueIntoChunks = (text: string): { speaker: string; text: string }[] => {
     const lines = text.split('\n');
     const chunks: { speaker: string; text: string }[] = [];
-    let currentSpeaker = 'Narrator'; // Default
+    let currentSpeaker = 'Narrator';
     let currentBuffer = '';
 
-    // Regex to detect "Name:" pattern
     const speakerRegex = /^([A-Za-zÀ-ÖØ-öø-ÿ ]+):/i;
 
     for (const line of lines) {
         const match = line.match(speakerRegex);
         if (match) {
-            // If we have a buffer for the previous speaker, push it
             if (currentBuffer.trim()) {
                 chunks.push({ speaker: currentSpeaker, text: currentBuffer.trim() });
             }
-            // Start new speaker
             currentSpeaker = match[1].trim();
             currentBuffer = line.replace(speakerRegex, '').trim();
         } else {
-            // Append to current speaker
             if (line.trim()) {
                 currentBuffer += ' ' + line.trim();
             }
         }
     }
-    // Push final buffer
     if (currentBuffer.trim()) {
         chunks.push({ speaker: currentSpeaker, text: currentBuffer.trim() });
     }
 
-    // Further split very long chunks to avoid TTS timeouts
     const finalChunks: { speaker: string; text: string }[] = [];
-    const MAX_CHARS = 1500; 
+    const MAX_CHARS = 1000; 
 
     for (const chunk of chunks) {
         if (chunk.text.length > MAX_CHARS) {
-            // Split by sentences roughly
             const sentences = chunk.text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [chunk.text];
             let temp = '';
             for (const sentence of sentences) {
@@ -83,21 +95,15 @@ export const generateSpeech = async (
     },
     opfsFileHandle?: FileSystemFileHandle
 ): Promise<void> => {
-    const model = 'gemini-2.5-flash-preview-tts'; // Correct TTS model
+    const model = 'gemini-2.5-flash-preview-tts'; 
     const blocks = parseDialogueIntoChunks(text);
     const totalBlocks = blocks.length;
     let processedBlocks = 0;
-    
-    // Track total PCM bytes for the WAV header
     let totalPcmBytes = 0;
 
-    // Open writable stream if OPFS is used
     let writable: FileSystemWritableFileStream | null = null;
     if (opfsFileHandle) {
         writable = await opfsFileHandle.createWritable({ keepExistingData: false });
-        
-        // Write a PLACEHOLDER header (44 bytes) that we will overwrite later.
-        // Size 0 for now.
         const placeholderHeaderBlob = createWavHeader(0, 1, 24000, 16);
         const headerBytes = new Uint8Array(await placeholderHeaderBlob.arrayBuffer());
         await writeChunkToStream(writable, headerBytes);
@@ -105,18 +111,19 @@ export const generateSpeech = async (
 
     for (const block of blocks) {
         try {
-            // Determine voice
-            let voiceName = 'Aoede'; // Default female
+            let voiceName = 'Aoede'; 
             if (multiSpeakerConfig) {
                 const speakerMap = multiSpeakerConfig.speakers.find(s => 
-                    block.speaker.toLowerCase().includes(s.name.toLowerCase().split(' ')[0]) // Match first name
+                    block.speaker.toLowerCase().includes(s.name.toLowerCase().split(' ')[0])
                 );
                 if (speakerMap) voiceName = speakerMap.voice;
             }
 
-            // Surgical Clean: Remove stage directions from start of speech only
             const textToSpeak = cleanTextForSpeech(block.text);
-            if (!textToSpeak.trim()) continue;
+            if (!textToSpeak.trim()) {
+                processedBlocks++;
+                continue;
+            }
 
             const response = await ai.models.generateContent({
                 model,
@@ -125,14 +132,14 @@ export const generateSpeech = async (
                     responseModalities: ['AUDIO'],
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName } }
-                    }
+                    },
+                    systemInstruction: "You are a professional Brazilian voice-over artist. Speak in clear Brazilian Portuguese (PT-BR) with a therapeutic tone. NEVER mention symbols, meta-info, or instructions. Focus only on the emotional flow of the words."
                 }
             });
 
             const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
             
             if (audioData) {
-                // Decode Base64 to Uint8Array
                 const binaryString = atob(audioData);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -152,31 +159,23 @@ export const generateSpeech = async (
                 callbacks.onProgress(Math.round((processedBlocks / totalBlocks) * 100));
             }
 
-            // Small delay to be gentle on rate limits
-            await new Promise(r => setTimeout(r, 100));
+            await new Promise(r => setTimeout(r, 150)); 
 
         } catch (e: any) {
-            console.error("TTS Generation Error on block:", block, e);
-            if (callbacks?.onError) callbacks.onError(`Error generating audio for block ${processedBlocks + 1}`);
-            // Continue to next block to salvage what we can
+            console.error("TTS Generation Error:", e);
+            if (callbacks?.onError) callbacks.onError(`Error generating block ${processedBlocks + 1}`);
         }
     }
 
     if (writable) {
-        // CORRECTION PHASE:
-        // We need to go back to the beginning of the file and write the REAL header 
-        // with the correct totalPcmBytes size so the file is playable.
         try {
             const realHeaderBlob = createWavHeader(totalPcmBytes, 1, 24000, 16);
             const realHeaderBytes = new Uint8Array(await realHeaderBlob.arrayBuffer());
-            
-            // Seek to the beginning
             await writable.seek(0);
             await writeChunkToStream(writable, realHeaderBytes);
         } catch (e) {
             console.error("Error writing WAV header:", e);
         }
-        
         await writable.close();
     }
 

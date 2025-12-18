@@ -1,5 +1,4 @@
 
-
 import { ai } from './geminiClient';
 import { YouTubeLongPost, SocialMediaPost } from '../types';
 
@@ -8,11 +7,10 @@ import { YouTubeLongPost, SocialMediaPost } from '../types';
 export interface UserContext {
     name?: string;
     birthDate?: string;
-    birthPlace?: string;   // Changed from location
-    currentPlace?: string; // New
+    birthPlace?: string;   
+    currentPlace?: string; 
 }
 
-// PIC: Deep Research Function
 const getSpiritualDossier = async (userData: UserContext, language: string, onStatusUpdate?: (status: string) => void): Promise<string> => {
     const model = 'gemini-2.5-flash';
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
@@ -22,49 +20,26 @@ const getSpiritualDossier = async (userData: UserContext, language: string, onSt
 
     const prompt = `
     Deep Research Task (PIC - Principle of Conscious Information):
+    Target User: ${userData.name || "Unknown"} | Origin: ${userData.birthPlace} | Context: ${userData.currentPlace}.
     
-    Target User Profile:
-    - Name: ${userData.name || "Unknown"}
-    - Birth Date: ${userData.birthDate || "Not provided"}
-    - Origin (Roots): ${userData.birthPlace || "Unknown"}
-    - Current Context (Soil): ${userData.currentPlace || "Unknown"}
-
     INSTRUCTIONS:
-    1. SEARCH (using Google Search) for:
-       - The spiritual, etymological, and biblical meaning of the Name.
-       ${userData.birthDate ? `- The generational context or "Spirit of the Time" for the birth date: ${userData.birthDate}.` : ""}
-       - The spiritual atmosphere, history, or "roots" of the Birth Place (${userData.birthPlace}).
-       - The spiritual atmosphere, challenges, or "climate" of the Current Place (${userData.currentPlace}).
+    Search for spiritual, etymological, and ancestral roots. Connect their birth location to their current "soil". 
+    Identify a powerful Biblical Archetype (e.g., Jesus Christ's sacrifice, David's courage in the caves, Solomon's architectural wisdom) that mirrors this trajectory.
     
-    2. ANALYZE THE JOURNEY (The "Exodus"):
-       - Connect the Roots (Birth) to the Soil (Current). How does where they came from empower them for where they are?
-       - Find a metaphor for this movement.
-       - Identify a biblical archetype fitting this trajectory.
-
     OUTPUT:
-    Return a concise but deep paragraph (in ${targetLang}) summarizing this "Soul Dossier".
-    Start with: "CONTEXTO ESPIRITUAL (PIC):"
+    Return a deep soul dossier in ${targetLang}. Start with: "CONTEXTO ESPIRITUAL (PIC):"
     `;
 
     try {
         const result = await ai.models.generateContent({
             model,
             contents: prompt,
-            config: {
-                tools: [{ googleSearch: {} }] // Enable Grounding
-            }
+            config: { tools: [{ googleSearch: {} }] }
         });
-
-        // The result will contain the synthesized text based on the search
-        let dossier = result.text || "";
-        
-        // Append grounding links if available (optional, but good for "truth")
-        // For the prayer generation, we mainly need the text content.
-        
-        return dossier;
+        return result.text || "";
     } catch (e) {
         console.error("Deep Research Failed", e);
-        return `Context: User ${userData.name}. Journey from ${userData.birthPlace || 'unknown'} to ${userData.currentPlace || 'unknown'}.`; // Fallback
+        return `User context: ${userData.name}. Journey from roots to current soil.`; 
     }
 };
 
@@ -74,167 +49,133 @@ export const generatePersonalizedPrayer = async (
     duration: number,
     onStatusUpdate?: (status: string) => void
 ): Promise<string> => {
-    // 1. Get the Deep Research Dossier
     const dossier = await getSpiritualDossier(userData, language, onStatusUpdate);
-    
     if (onStatusUpdate) onStatusUpdate('picLoadingSynthesizing');
 
-    // 2. Use the Dossier as the "Prompt" for the existing engine
-    // We wrap it to ensure the model understands this is a dossier, not just a simple theme.
     const augmentedPrompt = `
-    [DEEP PERSONALIZATION REQUEST]
-    Use the following Deep Research Dossier to customize the prayer.
-    Integrate the specific meanings of the name, the journey from origin to current location, and the date significance (if present) into the Hypnotic Script.
-    
+    [DEEP PERSONALIZATION & THEOLOGICAL MANDATE]
+    Integrate these specific soul insights and the identified Biblical Archetype into the True Plan structure:
     ${dossier}
     `;
-
-    // 3. Call the standard generator with the augmented prompt
     return generateGuidedPrayer(augmentedPrompt, language, duration);
 };
 
 export const generateGuidedPrayer = async (prompt: string, language: string, duration: number = 10): Promise<string> => {
-    const model = 'gemini-2.5-flash'; // Using Flash for high-volume text generation
-    
-    // Language Map
+    const model = 'gemini-2.5-flash'; 
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
     const targetLang = langMap[language] || 'Inglês';
-
-    // Channel Name Logic for CTA
     const channelName = language === 'pt' ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes';
 
-    // --- DURATION LOGIC (Word Count based) ---
-    // Calibrated to 160 WPM to ensure audio duration matches target.
-    // 5 min = 800 words. 10 min = 1600 words.
-    const WORDS_PER_MINUTE = 160;
+    const WORDS_PER_MINUTE = 100; 
     const totalTargetWords = duration * WORDS_PER_MINUTE;
-    
-    // We split into blocks to ensure the model doesn't lose coherence.
-    const MAX_WORDS_PER_BLOCK = 800;
-    
+    const MAX_WORDS_PER_BLOCK = 500;
     const numIterations = Math.max(1, Math.ceil(totalTargetWords / MAX_WORDS_PER_BLOCK));
     const targetWordsPerBlock = Math.round(totalTargetWords / numIterations);
 
     let fullPrayer = "";
     let lastContext = "";
 
-    console.log(`Starting Recursive Generation: ${duration} min = ~${totalTargetWords} words. Split into ${numIterations} blocks of ~${targetWordsPerBlock} words.`);
-
     for (let i = 0; i < numIterations; i++) {
         const isFirst = i === 0;
         const isLast = i === numIterations - 1;
         
-        // --- INSTRUCTION STACKING ARCHITECTURE ---
-        // Instead of choosing ONE instruction, we stack them based on the phase.
-        // This ensures a 1-block prayer gets Start + Body + End instructions.
-        
         const instructionStack: string[] = [];
 
-        // 1. PHASE: OPENING (Always for Block 0)
+        // 1. PHASE: OPENING (Fiel ao seu plano)
         if (isFirst) {
             instructionStack.push(`
             - PHASE: INDUCTION & HOOK (Opening)
             - Start with a 'Hypnotic Hook': A provocative question or deep validation of the user's pain to grab attention immediately (First 30s).
-            - Establish the Biblical Archetype or Metaphor for this session early on.
-            - IF A PERSONAL DOSSIER IS PROVIDED: Use the name, location energy, and specific meaning immediately to create rapport.
+            - Establish the Biblical Archetype (Jesus, Solomon, or David) early as the metaphysical guide.
+            - IF A PERSONAL DOSSIER IS PROVIDED: Use the name, location energy, and ancestral meaning to create instant rapport.
             `);
         } else {
              instructionStack.push(`
             - PHASE: CONTINUATION
-            - Continue the narrative flow seamlessly from the previous block. Do not repeat greetings.
+            - Continue the narrative flow seamlessly. Do not repeat greetings. Deepen the hypnotic state.
              `);
         }
 
-        // 2. PHASE: DEEPENING (Body Content - Needed for ALL blocks to add density)
+        // 2. PHASE: DEEPENING (Body Content - Fiel ao seu plano)
         instructionStack.push(`
         - PHASE: DEEPENING & THERAPY
-        - Use NLP loops, sensory descriptions (VAK), and embedded commands.
-        - Biblical metaphors (David/Solomon/Jesus) applied to modern psychology.
-        - Expand on the theme/dossier provided: "${prompt || 'Divine Connection'}". 
-        - BE VERBOSE AND DESCRIPTIVE. Do not rush.
+        - Use NLP loops, sensory descriptions (Visual, Auditory, Kinesthetic), and embedded commands.
+        - Biblical metaphors applied to modern psychology: The cave of David as the subconscious, Solomon's Temple as the mental architecture, or Jesus as the healer of the 'inner child'.
+        - Expand on the dossier/theme: "${prompt || 'Divine Connection'}". 
+        - BE VERBOSE AND DESCRIPTIVE.
         `);
 
-        // 3. PHASE: CLOSING (Always for the Last Block)
+        // 3. PHASE: CLOSING (Fiel ao seu plano)
         if (isLast) {
             instructionStack.push(`
             - PHASE: RESOLUTION & CALL TO ACTION (CTA)
-            - Anchor the feelings of peace and resolution.
-            - CRITICAL: Before the final blessing, the speaker MUST explicitly ask the listener to subscribe to the channel "${channelName}" to continue their spiritual journey. This request must be warm and integrated into the dialogue.
+            - Anchor the feelings of peace.
+            - CRITICAL: The speaker MUST explicitly and warmly ask the listener to subscribe to "${channelName}" to sustain this frequency.
             - End with a final blessing.
             `);
         }
 
-        const specificInstructions = instructionStack.join("\n");
-
         const systemInstruction = `
         You are a Master of Guided Prayer and Erickson Hypnosis.
-        Your goal is to write a DEEPLY THERAPEUTIC dialogue script.
         
-        CRITICAL RULES:
-        1. CHARACTERS: The dialogue MUST be exclusively between "Roberta Erickson" (Voice: Aoede, Soft, NLP Guide) and "Milton Dilts" (Voice: Enceladus, Deep, Hypnotic Voice).
-        2. FORMAT: Always start lines with "Roberta Erickson:" or "Milton Dilts:". Do NOT use other names.
-        3. LANGUAGE: Write strictly in ${targetLang}.
-        4. NO META-DATA: Do NOT write introductions, summaries, or stage directions. Just the dialogue.
-        5. TONE: Hypnotic, slow, rhythmic, spiritual but grounded in psychology.
-        
-        INSTRUCTIONS FOR THIS BLOCK (Part ${i + 1} of ${numIterations}):
-        ${specificInstructions}
-        
-        ${!isFirst ? `CONTEXT FROM PREVIOUS BLOCK: "...${lastContext.slice(-300)}"` : ""}
+        STRICT RULES:
+        1. CHARACTERS: Dialogue exclusively between "Roberta Erickson" (Soft, NLP Guide) and "Milton Dilts" (Deep, Hypnotic Voice).
+        2. FORMAT: Always start lines with "Roberta Erickson:" or "Milton Dilts:".
+        3. MANDATORY BIBLE: Weave in the life and wisdom of Jesus Christ, Solomon, or David. They are not just names, they are the power behind the prayer.
+        4. NO META-DATA: NO stage directions, no (Pause), no [Voice lowers]. Just the spoken text.
+        5. LANGUAGE: Strictly ${targetLang}.
         `;
 
         const userPrompt = `
-        Write Part ${i + 1}/${numIterations} of the prayer about "${prompt}".
+        Write Part ${i + 1}/${numIterations} of the script (~${targetWordsPerBlock} words).
         
-        LENGTH CONSTRAINT: Write approximately ${targetWordsPerBlock} words for this section.
-        This is crucial to fit the time limit. Do not summarize. Be verbose.
-        
-        Keep the flow continuous. Start directly with a character name.
+        PHASE INSTRUCTIONS:
+        ${instructionStack.join("\n")}
+
+        ${!isFirst ? `PREVIOUS FLOW: "...${lastContext.slice(-200)}"` : ""}
         `;
 
         try {
             const result = await ai.models.generateContent({
                 model,
                 contents: userPrompt,
-                config: { systemInstruction, temperature: 0.7 } 
+                config: { systemInstruction, temperature: 0.82 } 
             });
-            
             const text = result.text || "";
             fullPrayer += text + "\n\n";
             lastContext = text;
         } catch (e) {
-            console.error(`Error in block ${i}:`, e);
+            console.error(`Block ${i} failed`, e);
             break; 
         }
     }
-
     return fullPrayer;
 };
 
 export const generateShortPrayer = async (prompt: string, language: string): Promise<string> => {
-    // "Pills" are meant to be short. 5 minutes (800 words) might be too long for a "Pill".
-    // Setting to 2 minutes (~320 words) for a punchy, short prayer.
     return generateGuidedPrayer(prompt, language, 2); 
 };
 
-// --- MARKETING ASSETS GENERATION ---
+// --- PRIME SEO MARKETING ENGINEERING ---
 
 export const generateSocialMediaPost = async (prayer: string, language: string): Promise<SocialMediaPost> => {
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-3-flash-preview';
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
     const targetLang = langMap[language] || 'Inglês';
 
     const prompt = `
-    You are a Social Media Manager for a spiritual channel.
-    Create a viral Instagram/TikTok caption for this prayer: "${prayer.substring(0, 500)}..."
+    You are a PRIME LEVEL SEO & Neuromarketing Strategist.
+    Create a high-conversion Instagram post for this prayer: "${prayer.substring(0, 500)}..."
     
-    CRITICAL: The output language for the Title, Description and Hashtags MUST BE: ${targetLang}.
-    Do NOT output in English unless the target language is English.
+    NEURO-TITLES FORMULAS (Choose one for the 'title' field):
+    1. Pattern Interrupt: "Pare de orar do jeito errado."
+    2. Curiosity Gap: "O que Jesus disse sobre o seu [Problema] e ninguém te contou."
+    3. Authority: "A arquitetura mental de Salomão aplicada ao seu dia."
     
-    Output format JSON:
+    Output JSON in ${targetLang}:
     {
-        "title": "Catchy Hook (Max 50 chars) in ${targetLang}",
-        "description": "Engaging caption with emojis (Max 300 chars) in ${targetLang}",
+        "title": "A prime-level, magnetic headline",
+        "description": "Caption using AIDA + Biblical Anchoring",
         "hashtags": ["tag1", "tag2", "tag3", "tag4", "tag5"]
     }
     `;
@@ -244,118 +185,52 @@ export const generateSocialMediaPost = async (prayer: string, language: string):
         contents: prompt,
         config: { responseMimeType: "application/json" }
     });
-    
     return JSON.parse(response.text || "{}");
 };
 
 export const generateYouTubeLongPost = async (theme: string, subthemes: string[], language: string, duration: number): Promise<YouTubeLongPost> => {
-    const model = 'gemini-2.5-flash';
-    
+    const model = 'gemini-3-flash-preview';
     const langMap: {[key: string]: string} = { 'pt': 'Português', 'en': 'Inglês', 'es': 'Espanhol' };
     const targetLang = langMap[language] || 'Inglês';
-    
-    const isPT = language === 'pt';
-    const isES = language === 'es';
-    
-    // Channel Name logic
-    const channelName = isPT ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'; 
+    const channelName = language === 'pt' ? 'Fé em 10 Minutos' : 'Faith in 10 Minutes'; 
 
-    // Define Static Links Blocks based on Language
-    let linksBlock = '';
-
-    if (isPT) {
-        linksBlock = `
-🌌 PARTICIPE DESTA JORNADA:
-► SÉRIE: Portais da Consciência (Playlist): [https://www.youtube.com/watch?v=Q6x_C3uaKsQ&list=PLmeEfeSNeLbIyeBMB8HLrHwybI__suhgq]
-► SÉRIE: ARQUITETURA DA ALMA (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbIIm3MzGHSRFYfIONlBDofI
-► Oração da Manhã (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbKppEyZUaBoXw4BVxZTq-I2
-► Oração da Noite (Playlist): https://www.youtube.com/playlist?list=PLmeEfeSNeLbLFUayT8Sfb9IQzr0ddkrHC
-🔗 INSCREVA-SE NO CANAL: https://www.youtube.com/@fe10minutos
-        `;
-    } else if (isES) {
-        linksBlock = `
-🕊️ MIRA A CONTINUACIÓN:
-► Arquitectura del Alma (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPo11ap1JUSiItZtoiV_4lEH
-► Oraciones Matutinas (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPqym_6TF19PB71SpLpAGuZr
-► Oraciones Vespertinas (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPq91fvXaDSideb8wrnG-YtR
-🔗 SUSCRÍBETE AL CANAL: https://www.youtube.com/@Faithin10Minutes
-        `;
-    } else {
-        // English Default
-        linksBlock = `
-🕊️ WATCH NEXT:
-► Architecture of the Soul (Playlist) https://www.youtube.com/playlist?list=PLTQIQ5QpCYPo11ap1JUSiItZtoiV_4lEH
-► Morning Prayers (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPqym_6TF19PB71SpLpAGuZr
-► Evening Prayers (Playlist): https://www.youtube.com/playlist?list=PLTQIQ5QpCYPq91fvXaDSideb8wrnG-YtR
-🔗 SUBSCRIBE TO THE CHANNEL: https://www.youtube.com/@Faithin10Minutes
-        `;
-    }
+    let linksBlock = language === 'pt' ? 
+        `🌌 JORNADA PIC:\n► SÉRIE PORTAIS: [https://www.youtube.com/watch?v=Q6x_C3uaKsQ&list=PLmeEfeSNeLbIyeBMB8HLrHwybI__suhgq]\n► ARQUITETURA DA ALMA: https://www.youtube.com/playlist?list=PLmeEfeSNeLbIIm3MzGHSRFYfIONlBDofI\n🔗 INSCREVA-SE: https://www.youtube.com/@fe10minutos` :
+        `🕊️ NEXT STEPS:\n► Soul Architecture: https://www.youtube.com/playlist?list=PLTQIQ5QpCYPo11ap1JUSiItZtoiV_4lEH\n🔗 SUBSCRIBE: https://www.youtube.com/@Faithin10Minutes`;
 
     const systemInstruction = `
-    You are the SEO Expert for the channel '${channelName}'.
-    Task: Create metadata for a ${duration}-minute guided prayer video about "${theme}".
+    You are a YouTube GROWTH EXPERT and SEO Master.
+    Generate metadata for a ${duration}min video about "${theme}".
     
-    CRITICAL LANGUAGE RULE: ALL OUTPUT (Title, Description, Tags, Timestamps) MUST BE IN ${targetLang.toUpperCase()}.
-    Even if the channel name is in English, translate the rest of the text to ${targetLang}.
-    
-    OUTPUT RULES:
-    1. **Title**: Must be CLICKBAIT/High-Urgency in ${targetLang}. Use CAPS and Emojis. 
-       Model: "[URGENT/POWERFUL ADJECTIVE] ${duration} MIN [PRAYER/CONNECTION] [TOPIC] | ${channelName}".
-    2. **Description**: 
-       - Paragraph 1: AIDA Copywriting hook (3 sentences) in ${targetLang}. Start by repeating the exact Title.
-       - Paragraph 2: Describe the prayer using high volume keywords in ${targetLang}.
-       - **MANDATORY**: Insert the LINKS BLOCK exactly as provided below.
-       - End with 3 strong hashtags: #Prayer #Faith #[TOPIC_No_Space] (Translate these tags to ${targetLang}).
-    3. **Tags**: Generate 20 high-volume tags mixed with long-tail keywords in ${targetLang}.
-    4. **Timestamps**: Generate a list of chapters based on the subthemes in ${targetLang}. **DO NOT INCLUDE TIME CODES (00:00)**. Just the list of topics.
-    
-    MANDATORY LINKS BLOCK TO INSERT IN DESCRIPTION:
-    ${linksBlock}
+    PRIME SEO STRATEGY:
+    - Title: Use "The Negative Hook" or "The Forbidden Wisdom" archetypes.
+    - Description: First 2 lines must be high-impact hooks.
+    - Tags: Use semantic clusters (LSI keywords).
     `;
 
     const prompt = `
-    Generate JSON for this video in ${targetLang}:
-    Theme: ${theme}
-    Subthemes: ${subthemes.join(', ')}
-    
-    Output Schema:
+    Generate JSON in ${targetLang}:
     {
-        "title": "string",
-        "description": "string (including the links block)",
+        "title": "PRIME LEVEL SEO TITLE (Magnetic)",
+        "description": "NLP Description + Mandatory Links:\n${linksBlock}",
         "hashtags": ["#string", "#string", "#string"],
-        "timestamps": "string (multiline list of topics, NO TIME CODES)",
-        "tags": ["string", "string", ...]
+        "timestamps": "string (Thematic chapters)",
+        "tags": ["string", "string", "string"]
     }
     `;
 
     const response = await ai.models.generateContent({
         model,
         contents: prompt,
-        config: { 
-            responseMimeType: "application/json",
-            systemInstruction
-        }
+        config: { responseMimeType: "application/json", systemInstruction }
     });
-
     return JSON.parse(response.text || "{}");
 };
 
 export const getTrendingTopic = async (language: string, type: 'long' | 'short'): Promise<{theme: string, subthemes: string[]}> => {
-    // Simulated Trending Topics for the Agent
-    let themes: string[] = [];
-    
-    if (language === 'pt') {
-        themes = ['Cura da Ansiedade', 'Prosperidade Financeira', 'Dormir em Paz', 'Proteção da Família', 'Gratidão Matinal'];
-    } else if (language === 'es') {
-        themes = ['Sanación de la Ansiedad', 'Prosperidad Financiera', 'Dormir en Paz', 'Protección Familiar', 'Gratitud Matutina'];
-    } else {
-        themes = ['Healing Anxiety', 'Financial Prosperity', 'Sleep in Peace', 'Family Protection', 'Morning Gratitude'];
-    }
-    
+    const themes = language === 'pt' ? 
+        ['Cura e Arquétipo de Cristo', 'Prosperidade e o Templo de Salomão', 'A Coragem de Davi contra Gigantes Mentais'] :
+        ['Healing and Christ Archetype', 'Prosperity and Solomon\'s Temple', 'David\'s Courage vs Mental Giants'];
     const randomTheme = themes[Math.floor(Math.random() * themes.length)];
-    
-    return {
-        theme: randomTheme,
-        subthemes: ['Introduction', 'Deep Dive', 'Closing']
-    };
+    return { theme: randomTheme, subthemes: ['Indução', 'O Coração do Arquétipo', 'Resolução'] };
 };
