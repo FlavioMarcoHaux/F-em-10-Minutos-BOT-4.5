@@ -1,5 +1,5 @@
 
-import { ai } from './geminiClient';
+import { GoogleGenAI, Modality } from '@google/genai';
 import { writeChunkToStream } from '../utils/opfsUtils';
 import { createWavHeader } from '../utils/audio';
 
@@ -61,7 +61,7 @@ const parseDialogueIntoChunks = (text: string): { speaker: string; text: string 
     }
 
     const finalChunks: { speaker: string; text: string }[] = [];
-    const MAX_CHARS = 1000; 
+    const MAX_CHARS = 800; // Reduced chunk size for better stability
 
     for (const chunk of chunks) {
         if (chunk.text.length > MAX_CHARS) {
@@ -95,7 +95,12 @@ export const generateSpeech = async (
     },
     opfsFileHandle?: FileSystemFileHandle
 ): Promise<void> => {
-    const model = 'gemini-2.5-flash-preview-tts'; 
+    // Re-initialize AI client to ensure fresh API key context
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Model changed to 'gemini-2.5-flash-native-audio-preview-09-2025' to support Aoede and Enceladus voices correctly
+    const model = 'gemini-2.5-flash-native-audio-preview-09-2025'; 
+    
     const blocks = parseDialogueIntoChunks(text);
     const totalBlocks = blocks.length;
     let processedBlocks = 0;
@@ -111,35 +116,46 @@ export const generateSpeech = async (
 
     for (const block of blocks) {
         try {
+            // Defaulting to requested voices
             let voiceName = 'Aoede'; 
             if (multiSpeakerConfig) {
                 const speakerMap = multiSpeakerConfig.speakers.find(s => 
                     block.speaker.toLowerCase().includes(s.name.toLowerCase().split(' ')[0])
                 );
-                if (speakerMap) voiceName = speakerMap.voice;
+                if (speakerMap) {
+                    voiceName = speakerMap.voice; // Should be Aoede or Enceladus
+                }
+            } else if (block.speaker.toLowerCase().includes("milton")) {
+                voiceName = "Enceladus";
+            } else if (block.speaker.toLowerCase().includes("roberta")) {
+                voiceName = "Aoede";
             }
 
-            const textToSpeak = cleanTextForSpeech(block.text);
-            if (!textToSpeak.trim()) {
+            const cleanedText = cleanTextForSpeech(block.text);
+            if (!cleanedText.trim()) {
                 processedBlocks++;
                 continue;
             }
 
+            // Using generateContent with specific audio config for the Native Audio model
             const response = await ai.models.generateContent({
                 model,
-                contents: { parts: [{ text: textToSpeak }] },
+                contents: [{ parts: [{ text: cleanedText }] }],
                 config: {
-                    responseModalities: ['AUDIO'],
+                    responseModalities: [Modality.AUDIO],
                     speechConfig: {
-                        voiceConfig: { prebuiltVoiceConfig: { voiceName } }
+                        voiceConfig: { 
+                            prebuiltVoiceConfig: { voiceName } 
+                        }
                     },
-                    systemInstruction: "You are a professional Brazilian voice-over artist. Speak in clear Brazilian Portuguese (PT-BR) with a therapeutic tone. NEVER mention symbols, meta-info, or instructions. Focus only on the emotional flow of the words."
                 }
             });
 
-            const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+            const audioPart = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+            const audioData = audioPart?.inlineData?.data;
             
             if (audioData) {
+                // Manual base64 decode as per guidelines
                 const binaryString = atob(audioData);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -149,9 +165,13 @@ export const generateSpeech = async (
                 if (writable) {
                     await writeChunkToStream(writable, bytes);
                     totalPcmBytes += bytes.length;
-                } else if (callbacks?.onChunk) {
+                }
+                
+                if (callbacks?.onChunk) {
                     callbacks.onChunk(bytes);
                 }
+            } else {
+                console.warn(`No audio data returned for block ${processedBlocks + 1}`);
             }
 
             processedBlocks++;
@@ -159,24 +179,30 @@ export const generateSpeech = async (
                 callbacks.onProgress(Math.round((processedBlocks / totalBlocks) * 100));
             }
 
-            await new Promise(r => setTimeout(r, 150)); 
+            // Brief delay to prevent rate limit (429) errors
+            await new Promise(r => setTimeout(r, 250)); 
 
         } catch (e: any) {
-            console.error("TTS Generation Error:", e);
-            if (callbacks?.onError) callbacks.onError(`Error generating block ${processedBlocks + 1}`);
+            console.error(`Audio Generation Error (Block ${processedBlocks + 1}):`, e);
+            if (callbacks?.onError) {
+                const errorMsg = e.message || "Internal error";
+                callbacks.onError(`Error generating block ${processedBlocks + 1}: ${errorMsg}`);
+            }
+            break; // Stop on first fatal error
         }
     }
 
     if (writable) {
         try {
+            // Finalize header with correct data size
             const realHeaderBlob = createWavHeader(totalPcmBytes, 1, 24000, 16);
             const realHeaderBytes = new Uint8Array(await realHeaderBlob.arrayBuffer());
             await writable.seek(0);
             await writeChunkToStream(writable, realHeaderBytes);
+            await writable.close();
         } catch (e) {
-            console.error("Error writing WAV header:", e);
+            console.error("Error finalizing WAV file:", e);
         }
-        await writable.close();
     }
 
     if (callbacks?.onComplete) callbacks.onComplete();
